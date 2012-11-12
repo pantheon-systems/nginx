@@ -11,7 +11,7 @@
 Name:              nginx
 Epoch:             1
 Version:           1.2.4
-Release:           1%{?dist}
+Release:           1%{?dist}.pantheon
 
 Summary:           A high performance web server and reverse proxy server
 Group:             System Environment/Daemons
@@ -35,6 +35,12 @@ Source104:         50x.html
 # removes -Werror in upstream build scripts.  -Werror conflicts with
 # -D_FORTIFY_SOURCE=2 causing warnings to turn into errors.
 Patch0:            nginx-auto-cc-gcc.patch
+# Origin: https://github.com/arut/nginx-dav-ext-module
+Patch1:            nginx-dav-ext-module.patch
+# Origin: https://github.com/masterzen/nginx-upload-progress-module/tree/v0.9.0
+Patch2:            nginx-upload-progress-module.patch
+# Origin: http://trac.nginx.org/nginx/ticket/237
+Patch3:            nginx-systemd-socket-activation.patch
 
 BuildRequires:     GeoIP-devel
 BuildRequires:     gd-devel
@@ -65,7 +71,9 @@ memory usage.
 %prep
 %setup -q
 %patch0 -p0
-
+%patch1 -p0
+%patch2 -p0
+%patch3 -p0
 
 %build
 # nginx does not utilize a standard configure script.  It has its own
@@ -88,6 +96,9 @@ export DESTDIR=%{buildroot}
     --lock-path=/run/lock/subsys/nginx \
     --user=%{nginx_user} \
     --group=%{nginx_group} \
+    --add-module=contrib/nginx-upload-progress-module \
+    --add-module=contrib/nginx-dav-ext-module \
+    --with-systemd \
     --with-file-aio \
     --with-ipv6 \
     --with-http_ssl_module \
@@ -157,14 +168,38 @@ if [ $1 -eq 1 ]; then
     exit 0
 fi
 
+# These system macros only exist in Fedora 18+.
+#%post
+#%systemd_post nginx.service
+
+#%preun
+#%systemd_preun nginx.service
+
+#%postun
+#%systemd_postun nginx.service
+
+# Begin triggers pulled from the Fedora 17 spec.
 %post
-%systemd_post nginx.service
+if [ $1 -eq 1 ]; then
+    /bin/systemctl daemon-reload >/dev/null 2>&1 || :
+fi
+
+%triggerun -- nginx < 1:1.0.12-2
+if /sbin/chkconfig --level 3 nginx; then
+    /bin/systemctl enable nginx.service >/dev/null 2>&1 || :
+fi
+/sbin/chkconfig --del nginx >/dev/null 2>&1 || :
+/bin/systemctl try-restart nginx.service >/dev/null 2>&1 || :
 
 %preun
-%systemd_preun nginx.service
+if [ $1 -eq 0 ]; then
+    /bin/systemctl --no-reload disable nginx.service >/dev/null 2>&1 || :
+    /bin/systemctl stop nginx.service >/dev/null 2>&1 || :
+fi
 
 %postun
-%systemd_postun nginx.service
+/bin/systemctl daemon-reload >/dev/null 2>&1 || :
+# End triggers pulled from the Fedora 17 spec.
 
 %files
 %doc LICENSE CHANGES README
